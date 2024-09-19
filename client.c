@@ -1,11 +1,3 @@
-/*
-1. login utente: username e password (cryptata tramite crypt() con SHA256) da salvare in un file passwd da aprire su server.c in modo che lo si possa aprire con opzione "w+"
-loop:
-2. stampa tabella utenti (aggiornabile tramite comando "aggiorna")
-3. "cosa vuoi fare?" (lettura messaggi spediti all'utente, spedizione messaggio a un utente del sistema, cancellazione massaggi ricevuti dall'utente)
-4. autenticazione
-*/
-
 #include "lib.h"
 
 char username[129];
@@ -20,29 +12,27 @@ int registrazione_utente(int sockfd){
 
     //acquisizione username
     do{
-//username:
-    printf("Inserisci username: ");
-    if(fgets(username, 129, stdin) == NULL){
-        puts("fgets failed");
-        exit(EXIT_FAILURE);
-    }
-    if(strstr(username, ":") != NULL){
-        puts("lo username non può contenere il carattere ':'");
-        //goto username;
-        continue;
-    }
-    size = strlen(username);
-    username[size - 1] = '\0';
-    send(client_sd, username, size + 1, 0);puts("check send");
-    recv(client_sd, buffer, 129, 0);printf("\nwww%swww\n", strerror(errno));
-    if(strcmp(buffer, "utente già esistente, riprovare con username diverso dai seguenti usernames:\n") == 0){
-        puts("utente già esistente, riprovare con username diverso dai seguenti usernames:\n");
-        while(recv(client_sd, user, 129, 0) > 0){
-            printf("\t%s\n", user);
-            memset(user, 0, 129);
-        }
-    }
-    else if(strcmp(buffer, "username utilizzabile") == 0) valid_user = 1;
+    	printf("Inserisci username: ");
+    	if(fgets(username, 129, stdin) == NULL){
+        	printf("fgets failed, errno: %s\n", strerror(errno));
+        	exit(EXIT_FAILURE);
+    	}
+    	if(strstr(username, ":") != NULL){
+        	puts("lo username non può contenere il carattere ':'");
+        	continue;
+    	}
+    	size = strlen(username);
+    	username[size - 1] = '\0';
+    	send(client_sd, username, size + 1, 0);
+    	recv(client_sd, buffer, 129, 0);
+    	if(strcmp(buffer, "utente già esistente, riprovare con username diverso dai seguenti usernames:\n") == 0){
+        	puts("utente già esistente, riprovare con username diverso dai seguenti usernames:\n");
+        	while(recv(client_sd, user, 129, 0) > 0){
+            	printf("\t%s\n", user);
+            	memset(user, 0, 129);
+        	}
+    	}
+    	else if(strcmp(buffer, "username utilizzabile") == 0) valid_user = 1;
     }while(!valid_user);
 
     //set impostazioni terminale
@@ -53,15 +43,15 @@ int registrazione_utente(int sockfd){
         printf("Inserisci password: ");
         if(scanf("%ms", &password) == EOF){
             free(password);
-            printf("scanf failed, errno: %d\n", errno);
+            printf("scanf failed, errno: %s\n", strerror(errno));
             exit(EXIT_FAILURE);
         }
+        puts("");
         CLEAR_INPUT_BUFFER;
-        puts("\n");
         printf("Re-inserisci password: ");
         if(scanf("%ms", &password_check) == EOF){
             free(password_check);
-            printf("scanf failed, errno: %d\n", errno);
+            printf("scanf failed, errno: %s\n", strerror(errno));
             exit(EXIT_FAILURE);
         }
         CLEAR_INPUT_BUFFER;
@@ -80,21 +70,23 @@ int registrazione_utente(int sockfd){
 
     free(password);
     free(password_check);
+	puts("");
 }
 
 
 
 int autenticazione(){
-    char *password, encrypted_password[33];//siamo sicuri che serva questo array?mpotrei cambiare nome e dimensione...
+    char *password;
     long file_pointer;
     int res, size;
 
     no_echo_input(&orig_term_conf);
 
+	//acquisizione password dell'utente
     printf("password di %s: ", username);
     if(scanf("%ms", &password) == EOF){
         free(password);
-        puts("scanf failed, errno: %d\n");
+        printf("scanf failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 	CLEAR_INPUT_BUFFER;
@@ -106,9 +98,7 @@ int autenticazione(){
     send(client_sd, password, size, 0);
 
     recv(client_sd, &res, sizeof(int), 0);
-    printf("%d\n", res);
-    //fgets(encrypted_password, 33, stdin);
-    //per eliminare il carattere '\n' da stdin (che scanf("%ms", ...) non legge) che potrebbe dar fastidio
+    puts("");
     return res;
 }
 
@@ -123,7 +113,7 @@ void stampa_utenti(){
 		if(size == -1) break;
         else{
         	if((buffer = malloc(size)) == NULL){
-        		puts("malloc failed");
+        		printf("malloc failed, errno: %s\n", strerror(errno));
         		exit(EXIT_FAILURE);
     		}
     		recv(client_sd, buffer, size, 0);
@@ -136,33 +126,33 @@ void stampa_utenti(){
 
 
 void read_msg(){
-	int size, cancellabile;
+	int size;
 	char *check, *buffer;
 
 	recv(client_sd, &size, sizeof(int), 0);
 	if((check = malloc(size)) == NULL){
-		puts("malloc failed");
+		printf("malloc failed, errno: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
     recv(client_sd, check, size, 0);
-    printf("%s", check);
     if(strcmp(check, "\n\nmessaggi a te inviati:\n") == 0){
-    	printf("\n@@@%d@@@\n", size);
-        while( (cancellabile = recv(client_sd, &size, sizeof(int), 0)) > 0){printf("\n###%d###\n", cancellabile);
-        	printf("\n@@@%d@@@\n", size);
+        while(recv(client_sd, &size, sizeof(int), 0) > 0){
         	if(size == -1) break;
             else{
         		if((buffer = malloc(size)) == NULL){
-                	puts("malloc failed");
+                	printf("malloc failed, errno: %s\n", strerror(errno));
                 	exit(EXIT_FAILURE);
 	        	}
             	recv(client_sd, buffer, size, 0);
-            	printf("%s", buffer);
+				printf("%s", buffer);
             	free(buffer);
         	}
         }
-    }
+    }else{
+    	printf("\n%s\n", check);
+	}
     free(check);
+    puts("");
 }
 
 
@@ -172,17 +162,18 @@ void write_msg(){
 	char user[129], *check, *line = NULL;
 	size_t len = 0;
 
+	//acquisizione destinatario
 	do{
 		stampa_utenti();
 		printf("inserisci username dell'utente cui vuoi spedire un messaggio: ");
         if(fgets(user, 129, stdin) == NULL){
-            puts("fgets failed");
+            printf("fgets failed, errno: %s\n", strerror(errno));
             exit(EXIT_FAILURE);
         }
         user[strlen(user) - 1] = '\0';
-        puts("\n");
+        puts("");
         send(client_sd, user, 129, 0);
-        recv(client_sd, &size, sizeof(int), 0);printf("size: %d\n", size);
+        recv(client_sd, &size, sizeof(int), 0);
         if((check = malloc(size)) == NULL){
         	printf("malloc failed, errno: %s\n", strerror(errno));
         	exit(EXIT_FAILURE);
@@ -193,32 +184,32 @@ void write_msg(){
         	free(check);
     	}
 		else if(strcmp(check, "username non trovato") == 0){
-			puts("\nusername non trovato");
+			puts("username non trovato");
 			free(check);
 		}
 	}while(!found_dest);
 
+	//acquisizione oggetto del messaggio
 	puts("inserisci oggetto del messaggio:");
     if(getline(&line, &len, stdin) == -1){
-        puts("getline failed");
+        printf("getline failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
     puts("\n");
     size = strlen(line);
 	line[size - 1] = '\0';
-    printf("aaa%ldaaa%saaa", len, line);
 	send(client_sd, &size, sizeof(int), 0);
     send(client_sd, line, size, 0);
 
+	//acquisizione testo del messaggio
     puts("inserisci testo del messaggio:");
     if(getline(&line, &len, stdin) == -1){
-        puts("scanf failed");
+        printf("getline failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
     puts("\n");
     size = strlen(line);
     line[size - 1] = '\0';
-    printf("aaa%ldaaa%saaa", len, line);
     send(client_sd, &size, sizeof(int), 0);
     send(client_sd, line, size, 0);
     free(line);
@@ -232,10 +223,11 @@ void del_msg(){
 
 	recv(client_sd, &size, sizeof(int), 0);
 	if((check = malloc(size)) == NULL){
-		puts("malloc failed");
+		printf("malloc failed, errno: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	recv(client_sd, check, size, 0);
+	puts("\n\nmessaggi cancellati con successo\n\n");
 }
 
 
@@ -260,9 +252,8 @@ void handler(int signum){
 
 
 int main(int argc, char **argv){
-    //struct sockaddr_in client;
     struct sockaddr_in server;
-    int size = 0, cancellabile;
+    int size = 0;
     long choice;
     char str_choice[11], *endptr, user[129], *buffer, *check;
 	char *line = NULL;
@@ -276,41 +267,32 @@ int main(int argc, char **argv){
 
     //creazione socket
     if( (client_sd = (socket(AF_INET, SOCK_STREAM, 0))) == -1){
-        printf("socket failed, errno: %d\n", errno);
+        printf("socket failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-/*
-    client.sin_family = AF_INET;
-    client.sin_port = htons(0);
-    client.sin_addr.s_addr = htonl(INADDR_ANY);
-    bzero(&(client.sin_zero), 8); //client.sin_zero contiene così tutti zeri
-teoricamente innecessaria la bind() dato che la presente applicazione non necessita di una connessione tra due client
-*/
+
     server.sin_family = AF_INET;
     server.sin_port = htons(PORT);
 
     //connessione del client al server
     if(connect(client_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
-        printf("connect failed, errno: %d\n", errno);
+        printf("connect failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
-	pid = getpid();printf("\nxxx%dxxx\n", pid);
+	pid = getpid();
 	send(client_sd, &pid, sizeof(pid_t), 0);
 
     registrazione_utente(client_sd);
 
-//da qui in poi dovrebbe essere un while(1)
-    //acquisizione input utente
+   //acquisizione input utente
     while(1){
         printf("\ncosa vuoi fare? " CORSIVO "(rispondi con numero corrispondente)" RESET "\n1. leggi messaggi per te\n2. spedisci messaggio\n3. cancella messaggi per te\n4. stampa utenti connessi al server\n5. termina connessione col server\n");
-        if(fgets(str_choice, 11, stdin) == NULL/*scanf("%10s", str_choice) == EOF*/){
-        	puts("fgets failed");printf("\n===%s===\n", strerror(errno));
+        if(fgets(str_choice, 11, stdin) == NULL){
+        	puts("fgets failed");
         	exit(EXIT_FAILURE);
     	}
 		str_choice[strlen(str_choice) - 1] = '\0';
-    	printf("\n<<<%s>>>\n", str_choice);
-    	//CLEAR_INPUT_BUFFER;
         choice = strtol(str_choice, &endptr, 10);
         if(str_choice == endptr){
             puts("input invalido (1), riprova");
@@ -322,156 +304,37 @@ teoricamente innecessaria la bind() dato che la presente applicazione non necess
             puts("input invalido (3), riprova");
             continue;
         }else{
-        	puts("input valido");
             send(client_sd, &choice, sizeof(int), 0);
         }
 
-		//CLEAR_INPUT_BUFFER;
-
         switch(choice){
             case 1:
-                if(autenticazione()){/*
-                	recv(client_sd, &size, sizeof(int), 0);
-                	if((check = malloc(size)) == NULL){
-                		puts("malloc failed");
-                		exit(EXIT_FAILURE);
-            		}
-                    recv(client_sd, check, size, 0);
-                    printf("%s", check);
-                    if(strcmp(check, "\n\nmessaggi a te inviati:\n") == 0){
-                    	printf("\n@@@%d@@@\n", size);
-                        while( (cancellabile = recv(client_sd, &size, sizeof(int), 0)) > 0){printf("\n###%d###\n", cancellabile);
-                        	printf("\n@@@%d@@@\n", size);
-                        	if(size == -1) break;
-                            else{
-                            	if((buffer = malloc(size)) == NULL){
-                                	puts("malloc failed");
-                                	exit(EXIT_FAILURE);
-                            	}
-                            	recv(client_sd, buffer, size, 0);
-                            	printf("%s", buffer);
-                            	free(buffer);
-                        	}
-                        }
-                    }
-                    free(check);*/
-read_msg();
+                if(autenticazione()){
+					read_msg();
                 }
                 else puts("\npassword errata\n");
 				break;
             case 2:
                 if(autenticazione()){
 	                send(client_sd, username, 129, 0);
-
-
-	                /*puts("\tlista degli utenti connessi al server:");
-                    while(recv(client_sd, &size, sizeof(int), 0) > 0){
-                    	if(size == -1) break;
-                        else{
-                        	if((buffer = malloc(size)) == NULL){
-                        		printf("malloc failed, errno: %s\n", strerror(errno));
-                        		exit(EXIT_FAILURE);
-                    		}
-                    		recv(client_sd, buffer, size, 0);
-                        	printf("\t\t%s\n", buffer);
-                        	free(buffer);
-                    	}
-    	            /*puts("\tlista degli utenti connessi al server:");
-        	        while(recv(client_sd, user, 129, 0) > 0){
-        	            if(strcmp(user, ":fatto:") == 0) break;
-            	        else{
-                	        printf("\t\t%s\n", user);
-                    	    memset(user, 0, 129);
-                    	}*/
-                	//}
-                	/*
-destinatario:
-                    printf("inserisci username dell'utente cui vuoi spedire un messaggio: ");
-                    if(fgets(user, 129, stdin) == NULL){
-                        puts("fgets failed");
-                        exit(EXIT_FAILURE);
-                    }
-                    user[strlen(user) - 1] = '\0';
-                    puts("\n");
-                    send(client_sd, user, 129, 0);
-                    recv(client_sd, &size, sizeof(int), 0);printf("size: %d\n", size);
-                    if((check = malloc(size)) == NULL){
-                    	printf("malloc failed, errno: %s\n", strerror(errno));
-                    	exit(EXIT_FAILURE);
-                	}
-                    recv(client_sd, check, size, 0);
-					if(strcmp(check, "username non trovato") == 0){
-						puts("\nusername non trovato");
-						free(check);
-						goto destinatario;
-					}
-					free(check);
-
-                    puts("inserisci oggetto del messaggio:");
-                    if(getline(&line, &len, stdin) == -1){
-                        puts("getline failed");
-                        exit(EXIT_FAILURE);
-                    }
-                    puts("\n");
-                    size = strlen(line);
-                    line[size - 1] = '\0';
-                    printf("aaa%ldaaa%saaa", len, line);
-                    send(client_sd, &size, sizeof(int), 0);
-                    send(client_sd, line, size, 0);
-
-                    puts("inserisci testo del messaggio:");
-                    if(getline(&line, &len, stdin) == -1){
-                        puts("scanf failed");
-                        exit(EXIT_FAILURE);
-                    }
-                    puts("\n");
-                    size = strlen(line);
-                    line[size - 1] = '\0';
-                    printf("aaa%ldaaa%saaa", len, line);
-                    send(client_sd, &size, sizeof(int), 0);
-                    send(client_sd, line, size, 0);
-                    free(line);*/
                     write_msg();
                 }
                 else puts("\npassword errata\n");
                 break;
             case 3:
-                if(autenticazione()){/*
-                	recv(client_sd, &size, sizeof(int), 0);
-                	if((check = malloc(size)) == NULL){
-                		puts("malloc failed");
-                		exit(EXIT_FAILURE);
-            		}
-                    recv(client_sd, check, size, 0);*/
-del_msg();
+                if(autenticazione()){
+					del_msg();
                 }
                 else puts("\npassword errata\n");
                 break;
             case 4:
-                if(autenticazione()){/*
-                	puts("\tlista degli utenti connessi al server:");
-                    while(recv(client_sd, &size, sizeof(int), 0) > 0){
-                    	if(size == -1) break;
-                        else{
-                        	if((buffer = malloc(size)) == NULL){
-                        		puts("malloc failed");
-                        		exit(EXIT_FAILURE);
-                    		}
-                    		recv(client_sd, buffer, size, 0);
-                        	printf("\t\t%s\n", buffer);
-                        	free(buffer);
-                    	}
-                    }*/
+                if(autenticazione()){
                     stampa_utenti();
                 }
                 else puts("\npassword errata\n");
                 break;
             case 5:
-                if(autenticazione()){/*
-                    recv(client_sd, &size, sizeof(int), 0);
-					puts("");
-                    close(client_sd);
-                    exit(EXIT_SUCCESS);*/
+                if(autenticazione()){
                     close_client();
                 }
                 else puts("\npassword errata\n");
@@ -479,6 +342,3 @@ del_msg();
         }
     }
 }
-
-//forse conviene dividere il client in funzioni
-
