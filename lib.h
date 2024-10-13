@@ -16,19 +16,16 @@
 #include <string.h>
 
 #define PORT 5001
-#define MAX_CLIENT 150
+#define MAX_CLIENT 5//150
 #define PENDING 100
+#define TIMEOUT 5//1800//secondi (30 minuti)
+
+void TIMEOUT_OCCURRED(int i);
 
 #define CORSIVO "\033[3m"
 #define RESET "\033[0m"
 
 #define CLEAR_INPUT_BUFFER while(getchar() != '\n') //da usare solo dopo scanf("%ms",...); o altre funzioni di input che ignorano '\n'
-/*
-    do{ \
-        int c; \
-        while((c = getchar()) != '\n' && c != EOF); \
-    }while(0)
-*/
 
 
 struct messaggio{

@@ -12,6 +12,8 @@ pthread_mutex_t mutex_file = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_mess = PTHREAD_MUTEX_INITIALIZER;
 struct list head_list[MAX_CLIENT];
 
+void termina_connessione(int i);
+
 //ritorna -1 se non la trova, altrimenti ritorna la posizione del file pointer che indica l'inizio della parola (usato per cercare usernames in passwd)
 int cerca_username_in_file(FILE *file, char *word){
     int file_pointer;
@@ -67,12 +69,20 @@ int autenticazione(int i){
     int size, file_pointer, res;
 
 	//acquisizione password da confrontare con quella contenuta in passwd
-    recv(sock_des[i], &size, sizeof(int), 0);
+    if(recv(sock_des[i], &size, sizeof(int), 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+    		TIMEOUT_OCCURRED(i);
+		}
+	}
     if((buffer = malloc(size)) == NULL){
         printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    recv(sock_des[i], buffer, size, 0);
+    if(recv(sock_des[i], buffer, size, 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+    		TIMEOUT_OCCURRED(i);
+		}
+	}
 
 	//acquisizione password contenuta in passwd
     file_pointer = cerca_username_in_file(passwd, username[i]);
@@ -125,12 +135,22 @@ void spedisci_mess(int i){
     }
 
 	//acquisizione mittente
-    recv(sock_des[i], mess_ptr -> mittente, 129, 0);
+    if(recv(sock_des[i], mess_ptr -> mittente, 129, 0) == -1){
+		if(errno == EAGAIN || errno == EWOULDBLOCK){
+			free(mess_ptr);
+    		TIMEOUT_OCCURRED(i);
+		}
+	}
 
 	//acquisizione destinatario
 	do{
 		print_users(i);
-    	recv(sock_des[i], mess_ptr -> destinatario, 129, 0);
+    	if(recv(sock_des[i], mess_ptr -> destinatario, 129, 0) == -1){
+			if(errno == EAGAIN || errno == EWOULDBLOCK){
+				free(mess_ptr);
+    			TIMEOUT_OCCURRED(i);
+			}
+    	}
 		if(cerca_username_in_file(passwd, mess_ptr -> destinatario) == -1){
 			size = strlen("username non trovato") + 1;
     		send(sock_des[i], &size, sizeof(int), 0);
@@ -144,23 +164,47 @@ void spedisci_mess(int i){
 	}while(!found_dest);
     while(username[index][0] != '\0'  &&  strcmp(username[index], mess_ptr -> destinatario) != 0){
         index++;
-    }
+    }//non penso serva questa iterazione, si può cancellare
 
 	//acquisizione oggetto del messaggio
-    recv(sock_des[i], &size, sizeof(int), 0);
+    if(recv(sock_des[i], &size, sizeof(int), 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+    		free(mess_ptr);
+    		TIMEOUT_OCCURRED(i);
+		}
+	}
     if((mess_ptr -> oggetto = malloc(size)) == NULL){
 		printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    recv(sock_des[i], mess_ptr -> oggetto, size, 0);
+    if(recv(sock_des[i], mess_ptr -> oggetto, size, 0) == -1){
+		if(errno == EAGAIN || errno == EWOULDBLOCK){
+			free(mess_ptr -> oggetto);
+			free(mess_ptr);
+    		TIMEOUT_OCCURRED(i);
+		}
+	}
 
 	//acquisizione testo del messaggio
-    recv(sock_des[i], &size, sizeof(int), 0);
+    if(recv(sock_des[i], &size, sizeof(int), 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+    		free(mess_ptr -> oggetto);
+    		free(mess_ptr);
+    		TIMEOUT_OCCURRED(i);
+		}
+	}
     if((mess_ptr -> testo = malloc(size)) == NULL){
         printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    recv(sock_des[i], mess_ptr -> testo, size, 0);
+    if(recv(sock_des[i], mess_ptr -> testo, size, 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+    		free(mess_ptr -> oggetto);
+    		free(mess_ptr -> testo);
+    		free(mess_ptr);
+    		TIMEOUT_OCCURRED(i);
+		}
+	}
 
 	mess_ptr -> next = NULL;//essendo l'ultimo elemento della lista non punta a nulla (non è una lista circolare)
 
@@ -270,8 +314,29 @@ void termina_connessione(int i){
     pid[i] = 0;
     sock_des[i] = -1;
     close(sock_des[i]);
-    //che altro devo libera
     //devo chiudere anche nel server il socket con close(sock_des[i])?
+}
+
+
+
+void TIMEOUT_OCCURRED(int x){
+	long fpointer;
+	int check, temp;//temp assumerà il valore del pid del processo da terminare
+
+	pthread_mutex_lock(&mutex_file);
+	fpointer = ftell(passwd);
+	pthread_mutex_unlock(&mutex_file);
+	temp = pid[x];
+	if(fpointer != 0){
+		termina_connessione(x);
+	}else{
+		pid[x] = 0;
+		sock_des[x] = -1;
+		close(sock_des[x]);
+	}
+	check = kill(temp, SIGUSR2);
+	if(check == -1) printf("\nkill failed, errno: %s\n", strerror(errno));
+	pthread_exit(NULL);
 }
 
 
@@ -300,7 +365,12 @@ void *thread(void *arg){
     char *password, *encrypted_password;
 
     //ricezione username
-    recv(sock_des[me], username[me], 129, 0);
+puts("check");
+    if(recv(sock_des[me], username[me], 129, 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+			TIMEOUT_OCCURRED(me);
+		}
+	}
     if(cerca_username_in_file(passwd, username[me]) != -1){
         send(sock_des[me], "utente già esistente, riprovare con username diverso dai seguenti usernames:\n", strlen("utente già esistente, riprovare con username diverso dai seguenti usernames:\n") + 1, 0);
         print_users(me);
@@ -310,12 +380,21 @@ void *thread(void *arg){
 	}
 
     //ricezione password
-    recv(sock_des[me], &size, sizeof(int), 0);
+    if(recv(sock_des[me], &size, sizeof(int), 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+    		TIMEOUT_OCCURRED(me);
+		}
+	}
     if((password = malloc(size)) == NULL){
         printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    recv(sock_des[me], password, size, 0);
+    if(recv(sock_des[me], password, size, 0) == -1){
+    	if(errno == EAGAIN || errno == EWOULDBLOCK){
+			free(password);
+			TIMEOUT_OCCURRED(me);
+		}
+	}
 
     //criptazione password e inserimento nel file passwd
     encrypted_password = crypt(password, "$5$hakunamatataraga");
@@ -327,7 +406,11 @@ void *thread(void *arg){
 
 
     while(1){//probabilmente dovrò mettere dei mutex perché lavoro con il file (spostando il file pointer) nel thread
-        recv(sock_des[me], &choice, sizeof(int), 0);
+        if(recv(sock_des[me], &choice, sizeof(int), 0) == -1){
+			if(errno == EAGAIN || errno == EWOULDBLOCK){
+				TIMEOUT_OCCURRED(me);
+			}
+    	}
 
         switch(choice){
             case 1:
@@ -357,9 +440,13 @@ void *thread(void *arg){
 int main(int argc, char **argv){
     struct sockaddr_in server;
     struct sockaddr client;
+    struct timeval timeout;
     int server_sd;
     int addrlen = sizeof(client),i=0, check;
     pthread_t tid;
+
+    timeout.tv_sec = TIMEOUT;
+    timeout.tv_usec = 0; //inizializzato a 0 per evitare undefined behaviour
 
     for(; i<MAX_CLIENT; i++) sock_des[i]=-1;
 
@@ -395,6 +482,10 @@ int main(int argc, char **argv){
         printf("setsockopt failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
+    if(setsockopt(server_sd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1){
+    	printf("setsockopt failed, errno: %s\n", strerror(errno));
+    	exit(EXIT_FAILURE);
+	}
 
     //assegnazione indirizzo al socket
     if(bind(server_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
@@ -422,3 +513,7 @@ int main(int argc, char **argv){
     	i = (i+1) % MAX_CLIENT;
     }
 }
+
+//per gestire i segnali posso o effettuare una signal() per ignorare tali segnali prima di una funzione bloccante, OPPURE posso eseguire un check con errno==EINTR e, in caso rieseguendo la chiamata
+//cambiare TIMEOUT_OCCURRED() in timeout_occurred()
+//per client limitati inizializzo un semaforo con MAX_CLIENT token

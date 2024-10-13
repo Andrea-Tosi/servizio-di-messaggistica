@@ -244,8 +244,16 @@ void close_client(){
 
 
 //viene attivato quando il server viene chiuso: quest'ultimo "propaga" il segnale di interruzione inviandolo come SIGUSR1
-void handler(int signum){
+void handler1(int signum){
 	puts("\nil server è stato chiuso\n");
+	exit(0);
+}
+
+
+
+void handler2(int signum){
+	printf("\ntimeout of %d sec occurred\n", TIMEOUT);
+	reset_echo_input(&orig_term_conf); //in questo modo se il client viene interrotto mentre la configurazione del terminale è modificata, verrà resettata
 	exit(0);
 }
 
@@ -263,7 +271,8 @@ int main(int argc, char **argv){
 	signal(SIGINT, SIG_IGN);
 	signal(SIGTERM, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
-	signal(SIGUSR1, handler);
+	signal(SIGUSR1, handler1);
+	signal(SIGUSR2, handler2);
 
     //creazione socket
     if( (client_sd = (socket(AF_INET, SOCK_STREAM, 0))) == -1){
