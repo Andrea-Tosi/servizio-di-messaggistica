@@ -4,6 +4,8 @@ char username[129];
 int client_sd;
 struct termios orig_term_conf;
 pid_t pid;
+int sem_des;
+struct sembuf oper;
 
 
 int registrazione_utente(int sockfd){
@@ -23,7 +25,12 @@ int registrazione_utente(int sockfd){
     	}
     	size = strlen(username);
     	username[size - 1] = '\0';
-    	send(client_sd, username, size + 1, 0);
+    	send(client_sd, username, size + 1, MSG_NOSIGNAL);
+    	if(errno == ECONNRESET   ||   errno == EPIPE){
+    		puts("\nil server è stato chiuso\n");
+			close(client_sd);
+    		exit(0);
+		}
     	recv(client_sd, buffer, 129, 0);
     	if(strcmp(buffer, "utente già esistente, riprovare con username diverso dai seguenti usernames:\n") == 0){
         	puts("utente già esistente, riprovare con username diverso dai seguenti usernames:\n");
@@ -246,6 +253,8 @@ void close_client(){
 //viene attivato quando il server viene chiuso: quest'ultimo "propaga" il segnale di interruzione inviandolo come SIGUSR1
 void handler1(int signum){
 	puts("\nil server è stato chiuso\n");
+	reset_echo_input(&orig_term_conf); //in questo modo se il client viene interrotto mentre la configurazione del terminale è modificata, verrà resettata
+	close(client_sd);
 	exit(0);
 }
 
@@ -254,6 +263,7 @@ void handler1(int signum){
 void handler2(int signum){
 	printf("\ntimeout of %d sec occurred\n", TIMEOUT);
 	reset_echo_input(&orig_term_conf); //in questo modo se il client viene interrotto mentre la configurazione del terminale è modificata, verrà resettata
+	close(client_sd);
 	exit(0);
 }
 
@@ -267,12 +277,17 @@ int main(int argc, char **argv){
 	char *line = NULL;
 	size_t len = 0;
 
-	//gestione segnali
-	signal(SIGINT, SIG_IGN);
-	signal(SIGTERM, SIG_IGN);
-	signal(SIGQUIT, SIG_IGN);
-	signal(SIGUSR1, handler1);
-	signal(SIGUSR2, handler2);
+	//salva le impostazioni standard del terminale (serve in caso di chiamata agli handler dato che loro non inizializzano la variabile orig_term_conf)
+	tcgetattr(STDIN_FILENO, &orig_term_conf);
+
+	//gestione semaforo
+	if( (sem_des = semget(KEY, 1, 0)) == -1){
+		printf("semget failed, errno: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	oper.sem_flg = SEM_UNDO;//se un client che usa il semaforo si interrompe in modo anomalo, l'operazione precedente eseguita su tale semaforo viene annullata
+	oper.sem_num = 0;
+	oper.sem_op = -1;
 
     //creazione socket
     if( (client_sd = (socket(AF_INET, SOCK_STREAM, 0))) == -1){
@@ -283,11 +298,20 @@ int main(int argc, char **argv){
     server.sin_family = AF_INET;
     server.sin_port = htons(PORT);
 
+	while(semop(sem_des, &oper, 1) == -1   &&   errno == EINTR);
+
     //connessione del client al server
     if(connect(client_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
         printf("connect failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
+
+    //gestione segnali (avviene dopo la connect() in modo tale che, se un client che si vuole connettere va in attesa che si liberi un posto nel server, può decidere di uscire dallo stato di attesa. In altre parole può interrompere il processo)
+	signal(SIGINT, SIG_IGN);
+	signal(SIGTERM, SIG_IGN);
+	signal(SIGQUIT, SIG_IGN);
+	signal(SIGUSR1, handler1);
+	signal(SIGUSR2, handler2);
 
 	pid = getpid();
 	send(client_sd, &pid, sizeof(pid_t), 0);

@@ -14,11 +14,13 @@
 #include <signal.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/sem.h>
 
 #define PORT 5001
-#define MAX_CLIENT 5//150
+#define MAX_CLIENT 150
 #define PENDING 100
-#define TIMEOUT 5//1800//secondi (30 minuti)
+#define KEY 1 //key deve essere >=0
+#define TIMEOUT 1800//secondi (30 minuti)
 
 void TIMEOUT_OCCURRED(int i);
 

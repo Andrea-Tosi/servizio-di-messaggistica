@@ -11,6 +11,9 @@ struct list{
 pthread_mutex_t mutex_file = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_mess = PTHREAD_MUTEX_INITIALIZER;
 struct list head_list[MAX_CLIENT];
+int sem_des;
+struct sembuf oper;
+
 
 void termina_connessione(int i);
 
@@ -164,7 +167,7 @@ void spedisci_mess(int i){
 	}while(!found_dest);
     while(username[index][0] != '\0'  &&  strcmp(username[index], mess_ptr -> destinatario) != 0){
         index++;
-    }//non penso serva questa iterazione, si può cancellare
+    }
 
 	//acquisizione oggetto del messaggio
     if(recv(sock_des[i], &size, sizeof(int), 0) == -1){
@@ -336,6 +339,8 @@ void TIMEOUT_OCCURRED(int x){
 	}
 	check = kill(temp, SIGUSR2);
 	if(check == -1) printf("\nkill failed, errno: %s\n", strerror(errno));
+
+	while(semop(sem_des, &oper, 1) == -1   &&   errno == EINTR);
 	pthread_exit(NULL);
 }
 
@@ -354,6 +359,10 @@ void handler(int signum){
     	}
 	}
 	fclose(passwd);
+	if(semctl(sem_des, 0, IPC_RMID) == -1){
+		printf("semctl failed, errno: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
 	exit(0);
 }
 
@@ -365,7 +374,6 @@ void *thread(void *arg){
     char *password, *encrypted_password;
 
     //ricezione username
-puts("check");
     if(recv(sock_des[me], username[me], 129, 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
 			TIMEOUT_OCCURRED(me);
@@ -428,6 +436,7 @@ puts("check");
             case 5:
                 if(autenticazione(me)){
                 	termina_connessione(me);
+                	while(semop(sem_des, &oper, 1) == -1   &&   errno == EINTR);
                 	pthread_exit(NULL);
             	}
                 break;
@@ -465,6 +474,19 @@ int main(int argc, char **argv){
     	head_list[i].head = NULL;
     	head_list[i].tail = NULL;
 	}
+
+	//creazione semaforo con MAX_CLIENT token
+	if( (sem_des = semget(KEY, 1, IPC_CREAT|0666)) == -1){
+		printf("semget failed, errno: %s\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
+	if( semctl(sem_des, 0, SETVAL, MAX_CLIENT) == -1){
+        printf("semctl failed, errno: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    oper.sem_flg = 0;
+    oper.sem_num = 0;
+	oper.sem_op = 1;
 
     //creaz socket
     if( (server_sd = (socket(AF_INET, SOCK_STREAM, 0))) == -1){
