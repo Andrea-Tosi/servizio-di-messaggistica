@@ -55,12 +55,12 @@ void print_users(int i){
     while((check = getline(&line, &len, passwd)) != -1){
     	sscanf(line, "%[^:]", user);
     	size = strlen(user) + 1;
-    	send(sock_des[i], &size, sizeof(int), 0);
-		send(sock_des[i], user, size, 0);
+    	while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+		while(send(sock_des[i], user, size, 0) == -1   &&   errno == EINTR);
     }
 	free(line);
 	size = -1;
-	send(sock_des[i], &size, sizeof(int), 0);
+	while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
 
     pthread_mutex_unlock(&mutex_file);
 }
@@ -72,18 +72,28 @@ int autenticazione(int i){
     int size, file_pointer, res;
 
 	//acquisizione password da confrontare con quella contenuta in passwd
-    if(recv(sock_des[i], &size, sizeof(int), 0) == -1){
+    while(recv(sock_des[i], &size, sizeof(int), 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
     		TIMEOUT_OCCURRED(i);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
     if((buffer = malloc(size)) == NULL){
         printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    if(recv(sock_des[i], buffer, size, 0) == -1){
+    while(recv(sock_des[i], buffer, size, 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
     		TIMEOUT_OCCURRED(i);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -101,12 +111,12 @@ int autenticazione(int i){
 	//confronto password
     if(strcmp(crypt(buffer, "$5$hakunamatataraga"), encrypted_password) == 0){
         res = 1;
-        send(sock_des[i], &res, sizeof(int), 0);
+        while(send(sock_des[i], &res, sizeof(int), 0) == -1   &&   errno == EINTR);
 		free(buffer);
         return 1;
     }else{
         res = 0;
-        send(sock_des[i], &res, sizeof(int), 0);
+        while(send(sock_des[i], &res, sizeof(int), 0) == -1   &&   errno == EINTR);
 		free(buffer);
         return 0;
     }
@@ -138,74 +148,114 @@ void spedisci_mess(int i){
     }
 
 	//acquisizione mittente
-    if(recv(sock_des[i], mess_ptr -> mittente, 129, 0) == -1){
+    while(recv(sock_des[i], mess_ptr -> mittente, 129, 0) == -1){
 		if(errno == EAGAIN || errno == EWOULDBLOCK){
 			free(mess_ptr);
     		TIMEOUT_OCCURRED(i);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			free(mess_ptr);
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
 
 	//acquisizione destinatario
 	do{
 		print_users(i);
-    	if(recv(sock_des[i], mess_ptr -> destinatario, 129, 0) == -1){
+    	while(recv(sock_des[i], mess_ptr -> destinatario, 129, 0) == -1){
 			if(errno == EAGAIN || errno == EWOULDBLOCK){
 				free(mess_ptr);
     			TIMEOUT_OCCURRED(i);
+			}else if(errno == EINTR){
+				continue;
+			}else{
+				free(mess_ptr);
+				printf("recv failed, errno: %s\n", strerror(errno));
+				exit(EXIT_FAILURE);
 			}
     	}
 		if(cerca_username_in_file(passwd, mess_ptr -> destinatario) == -1){
 			size = strlen("username non trovato") + 1;
-    		send(sock_des[i], &size, sizeof(int), 0);
-    		send(sock_des[i], "username non trovato", strlen("username non trovato") + 1, 0);
+    		while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+    		while(send(sock_des[i], "username non trovato", strlen("username non trovato") + 1, 0) == -1   &&   errno == EINTR);
 		}else{
 			found_dest = 1;
 			size = strlen("username trovato") + 1;
-			send(sock_des[i], &size, sizeof(int), 0);
-			send(sock_des[i], "username trovato", strlen("username trovato") + 1, 0);
+			while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+			while(send(sock_des[i], "username trovato", strlen("username trovato") + 1, 0) == -1   &&   errno == EINTR);
 		}
 	}while(!found_dest);
-    while(username[index][0] != '\0'  &&  strcmp(username[index], mess_ptr -> destinatario) != 0){
+    while(/*username[index][0] != '\0'  &&  */strcmp(username[index], mess_ptr -> destinatario) != 0){
         index++;
     }
 
 	//acquisizione oggetto del messaggio
-    if(recv(sock_des[i], &size, sizeof(int), 0) == -1){
+    while(recv(sock_des[i], &size, sizeof(int), 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
     		free(mess_ptr);
     		TIMEOUT_OCCURRED(i);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			free(mess_ptr);
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
     if((mess_ptr -> oggetto = malloc(size)) == NULL){
 		printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    if(recv(sock_des[i], mess_ptr -> oggetto, size, 0) == -1){
+    while(recv(sock_des[i], mess_ptr -> oggetto, size, 0) == -1){
 		if(errno == EAGAIN || errno == EWOULDBLOCK){
 			free(mess_ptr -> oggetto);
 			free(mess_ptr);
     		TIMEOUT_OCCURRED(i);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			free(mess_ptr -> oggetto);
+			free(mess_ptr);
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
 
 	//acquisizione testo del messaggio
-    if(recv(sock_des[i], &size, sizeof(int), 0) == -1){
+    while(recv(sock_des[i], &size, sizeof(int), 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
     		free(mess_ptr -> oggetto);
     		free(mess_ptr);
     		TIMEOUT_OCCURRED(i);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			free(mess_ptr -> oggetto);
+			free(mess_ptr);
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
     if((mess_ptr -> testo = malloc(size)) == NULL){
         printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    if(recv(sock_des[i], mess_ptr -> testo, size, 0) == -1){
+    while(recv(sock_des[i], mess_ptr -> testo, size, 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
     		free(mess_ptr -> oggetto);
     		free(mess_ptr -> testo);
     		free(mess_ptr);
     		TIMEOUT_OCCURRED(i);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			free(mess_ptr -> oggetto);
+			free(mess_ptr -> testo);
+			free(mess_ptr);
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -226,27 +276,27 @@ void leggi_mess(int i){
     pthread_mutex_lock(&mutex_mess);
     if(head_list[i].head == NULL){//lista vuota
     	size = strlen("\n\nnon ci sono messaggi da leggere\n\n") + 1;
-    	send(sock_des[i], &size, sizeof(int), 0);
-        send(sock_des[i], "\n\nnon ci sono messaggi da leggere\n\n", size, 0);
+    	while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+        while(send(sock_des[i], "\n\nnon ci sono messaggi da leggere\n\n", size, 0) == -1   &&   errno == EINTR);
     }else{
     	size = strlen("\n\nmessaggi a te inviati:\n") + 1;
-    	send(sock_des[i], &size, sizeof(int), 0);
-        send(sock_des[i], "\n\nmessaggi a te inviati:\n", size, 0);
+    	while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+        while(send(sock_des[i], "\n\nmessaggi a te inviati:\n", size, 0) == -1   &&   errno == EINTR);
         curr = head_list[i].head;
         while(curr != NULL){//si scorre tutta la lista per stamparne i contenuti
             size = strlen(curr -> mittente) + strlen(curr -> oggetto) + strlen(curr -> testo) + strlen("\nMITTENTE:\n\t\nOGGETTO:\n\t\nTESTO:\n\t\n") + 1;
-            send(sock_des[i], &size, sizeof(int), 0);
+            while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
             if((buffer = malloc(size)) == NULL){
                 printf("malloc failed, errno: %s\n", strerror(errno));
                 exit(EXIT_FAILURE);
             }
             sprintf(buffer, "\nMITTENTE:\n\t%s\nOGGETTO:\n\t%s\nTESTO:\n\t%s\n", curr -> mittente, curr -> oggetto, curr -> testo);
-            send(sock_des[i], buffer, size, 0);
+            while(send(sock_des[i], buffer, size, 0) == -1   &&   errno == EINTR);
             free(buffer);
             curr = curr -> next;
         }
         size = -1;
-	    send(sock_des[i], &size, sizeof(int), 0);
+	    while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
     }
     pthread_mutex_unlock(&mutex_mess);
 }
@@ -267,8 +317,8 @@ void cancella_mess(int i){
         }
     }
     size = strlen("fatto") + 1;
-    send(sock_des[i], &size, sizeof(int), 0);
-    send(sock_des[i], "fatto", strlen("fatto") + 1, 0);
+    while(send(sock_des[i], &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+    while(send(sock_des[i], "fatto", strlen("fatto") + 1, 0) == -1   &&   errno == EINTR);
     pthread_mutex_unlock(&mutex_mess);
 }
 
@@ -313,7 +363,7 @@ void termina_connessione(int i){
     cancella_mess(i);
     strcpy(username[i], "");
 
-    send(sock_des[i], &size, sizeof(int), MSG_NOSIGNAL); //flag per evitare SIGPIPE
+    while(send(sock_des[i], &size, sizeof(int), MSG_NOSIGNAL) == -1   &&   errno == EINTR); //MSG_NOSIGNAL: flag per evitare SIGPIPE
     pid[i] = 0;
     sock_des[i] = -1;
     close(sock_des[i]);
@@ -374,33 +424,49 @@ void *thread(void *arg){
     char *password, *encrypted_password;
 
     //ricezione username
-    if(recv(sock_des[me], username[me], 129, 0) == -1){
+    while(recv(sock_des[me], username[me], 129, 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
 			TIMEOUT_OCCURRED(me);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
     if(cerca_username_in_file(passwd, username[me]) != -1){
-        send(sock_des[me], "utente già esistente, riprovare con username diverso dai seguenti usernames:\n", strlen("utente già esistente, riprovare con username diverso dai seguenti usernames:\n") + 1, 0);
+        while(send(sock_des[me], "utente già esistente, riprovare con username diverso dai seguenti usernames:\n", strlen("utente già esistente, riprovare con username diverso dai seguenti usernames:\n") + 1, 0) == -1   &&   errno == EINTR);
         print_users(me);
     }
     else{
-    	send(sock_des[me], "username utilizzabile", strlen("username utilizzabile") + 1, 0);
+    	while(send(sock_des[me], "username utilizzabile", strlen("username utilizzabile") + 1, 0) == -1   &&   errno == EINTR);
 	}
 
     //ricezione password
-    if(recv(sock_des[me], &size, sizeof(int), 0) == -1){
+    while(recv(sock_des[me], &size, sizeof(int), 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
     		TIMEOUT_OCCURRED(me);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
     if((password = malloc(size)) == NULL){
         printf("malloc failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    if(recv(sock_des[me], password, size, 0) == -1){
+    while(recv(sock_des[me], password, size, 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
 			free(password);
 			TIMEOUT_OCCURRED(me);
+		}else if(errno == EINTR){
+			continue;
+		}else{
+			free(password);
+			printf("recv failed, errno: %s\n", strerror(errno));
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -414,9 +480,14 @@ void *thread(void *arg){
 
 
     while(1){//probabilmente dovrò mettere dei mutex perché lavoro con il file (spostando il file pointer) nel thread
-        if(recv(sock_des[me], &choice, sizeof(int), 0) == -1){
+        while(recv(sock_des[me], &choice, sizeof(int), 0) == -1){
 			if(errno == EAGAIN || errno == EWOULDBLOCK){
 				TIMEOUT_OCCURRED(me);
+			}else if(errno == EINTR){
+				continue;
+			}else{
+				printf("recv failed, errno: %s\n", strerror(errno));
+				exit(EXIT_FAILURE);
 			}
     	}
 
@@ -459,6 +530,7 @@ int main(int argc, char **argv){
 
     for(; i<MAX_CLIENT; i++) sock_des[i]=-1;
 
+	signal(SIGHUP, handler);
 	signal(SIGINT, handler);
 	signal(SIGQUIT, handler);
 	signal(SIGTERM, handler);
@@ -480,7 +552,7 @@ int main(int argc, char **argv){
 		printf("semget failed, errno: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-	if( semctl(sem_des, 0, SETVAL, MAX_CLIENT) == -1){
+	if(semctl(sem_des, 0, SETVAL, MAX_CLIENT) == -1){
         printf("semctl failed, errno: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
@@ -527,8 +599,17 @@ int main(int argc, char **argv){
     i = 0;
     while(1){
         if(sock_des[i] == -1){
-        	while((sock_des[i] = accept(server_sd, &client, &addrlen)) == -1);
-        	recv(sock_des[i], &(pid[i]), sizeof(pid_t), 0);
+			while((sock_des[i] = accept(server_sd, &client, &addrlen)) == -1);
+			while(recv(sock_des[i], &(pid[i]), sizeof(pid_t), 0) == -1){
+				if(errno == EAGAIN || errno == EWOULDBLOCK){
+        			TIMEOUT_OCCURRED(i);
+            	}else if(errno == EINTR){
+                	continue;
+            	}else{
+                	printf("recv failed, errno: %s\n", strerror(errno));
+                	exit(EXIT_FAILURE);
+            	}
+        	}
         	pthread_create(&tid, NULL, thread, (void *)i);
 			printf("\nthread creato, connesso con processo %d\n", pid[i]);
 		}
@@ -539,3 +620,5 @@ int main(int argc, char **argv){
 //per gestire i segnali posso o effettuare una signal() per ignorare tali segnali prima di una funzione bloccante, OPPURE posso eseguire un check con errno==EINTR e, in caso rieseguendo la chiamata
 //cambiare TIMEOUT_OCCURRED() in timeout_occurred()
 //per client limitati inizializzo un semaforo con MAX_CLIENT token
+
+//in alcuni casi di controllo di una recv, prima di eseguire exit() dovrei cancellare i messaggi

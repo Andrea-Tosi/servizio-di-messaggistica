@@ -20,23 +20,39 @@ int registrazione_utente(int sockfd){
         	exit(EXIT_FAILURE);
     	}
     	if(strstr(username, ":") != NULL){
-        	puts("lo username non può contenere il carattere ':'");
+        	puts("lo username non può contenere il carattere ':'\n");
         	continue;
-    	}
+    	}else if(strcmp(username, "\n") == 0){
+    		puts("lo username deve essere lungo almeno un carattere\n");
+    		continue;
+		}
     	size = strlen(username);
     	username[size - 1] = '\0';
-    	send(client_sd, username, size + 1, MSG_NOSIGNAL);
-    	if(errno == ECONNRESET   ||   errno == EPIPE){
-    		puts("\nil server è stato chiuso\n");
-			close(client_sd);
-    		exit(0);
+    	while(send(client_sd, username, size + 1, MSG_NOSIGNAL) == -1){
+    		if(errno == ECONNRESET   ||   errno == EPIPE){
+    			puts("\nil server è stato chiuso\n");
+				close(client_sd);
+    			exit(0);
+			}else if(errno == EINTR){
+				continue;
+			}else{
+				printf("send failed, errno: %s\n", strerror(errno));
+				exit(EXIT_FAILURE);
+			}
 		}
-    	recv(client_sd, buffer, 129, 0);
+    	while(recv(client_sd, buffer, 129, 0) == -1   &&   errno == EINTR);
     	if(strcmp(buffer, "utente già esistente, riprovare con username diverso dai seguenti usernames:\n") == 0){
         	puts("utente già esistente, riprovare con username diverso dai seguenti usernames:\n");
-        	while(recv(client_sd, user, 129, 0) > 0){
-            	printf("\t%s\n", user);
-            	memset(user, 0, 129);
+        	while(1){
+        		check = recv(client_sd, user, 129, 0);
+            	if(check > 0){
+            		printf("\t%s\n", user);
+            		memset(user, 0, 129);
+        		}else if(check == -1   &&   errno == EINTR){
+        			continue;
+    			}else{
+    				break;
+				}
         	}
     	}
     	else if(strcmp(buffer, "username utilizzabile") == 0) valid_user = 1;
@@ -72,8 +88,8 @@ int registrazione_utente(int sockfd){
 
     //invio a server password
     size = strlen(password) + 1;
-    send(sockfd, &size, sizeof(int), 0);
-    send(sockfd, password, size, 0);
+    while(send(sockfd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+    while(send(sockfd, password, size, 0) == -1   &&   errno == EINTR);
 
     free(password);
     free(password_check);
@@ -101,10 +117,10 @@ int autenticazione(){
     reset_echo_input(&orig_term_conf);
 
 	size = strlen(password) + 1;
-    send(client_sd, &size, sizeof(int), 0);
-    send(client_sd, password, size, 0);
+    while(send(client_sd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+    while(send(client_sd, password, size, 0) == -1   &&   errno == EINTR);
 
-    recv(client_sd, &res, sizeof(int), 0);
+    while(recv(client_sd, &res, sizeof(int), 0) == -1   &&   errno == EINTR);
     puts("");
     return res;
 }
@@ -112,10 +128,27 @@ int autenticazione(){
 
 
 void stampa_utenti(){
-	int size;
+	int size, check;
 	char *buffer;
 
 	puts("\tlista degli utenti connessi al server:");
+	while(1){
+		check = recv(client_sd, &size, sizeof(int), 0);
+		if(check == -1   &&   errno == EINTR) continue;
+		else if(check > 0){
+			if(size == -1) break;
+			else{
+				if((buffer = malloc(size)) == NULL){
+					printf("malloc failed, errno: %s\n", strerror(errno));
+					exit(EXIT_FAILURE);
+				}
+				while(recv(client_sd, buffer, size, 0) == -1   &&   errno == EINTR);
+				printf("\t\t%s\n", buffer);
+				free(buffer);
+			}
+		}else break;
+	}
+/*
     while(recv(client_sd, &size, sizeof(int), 0) > 0){
 		if(size == -1) break;
         else{
@@ -123,26 +156,43 @@ void stampa_utenti(){
         		printf("malloc failed, errno: %s\n", strerror(errno));
         		exit(EXIT_FAILURE);
     		}
-    		recv(client_sd, buffer, size, 0);
+    		while(recv(client_sd, buffer, size, 0) == -1   &&   errno == EINTR);
         	printf("\t\t%s\n", buffer);
         	free(buffer);
     	}
-    }
+    }*/
 }
 
 
 
 void read_msg(){
-	int size;
+	int size, received_bytes;
 	char *check, *buffer;
 
-	recv(client_sd, &size, sizeof(int), 0);
+	while(recv(client_sd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
 	if((check = malloc(size)) == NULL){
 		printf("malloc failed, errno: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-    recv(client_sd, check, size, 0);
+    while(recv(client_sd, check, size, 0) == -1   &&   errno == EINTR);
     if(strcmp(check, "\n\nmessaggi a te inviati:\n") == 0){
+    	while(1){
+    		received_bytes = recv(client_sd, &size, sizeof(int), 0);
+    		if(received_bytes == -1   &&   errno == EINTR) continue;
+    		else if(received_bytes > 0){
+    			if(size == -1) break;
+    			else{
+					if((buffer = malloc(size)) == NULL){
+						printf("malloc failed, errno: %s\n", strerror(errno));
+						exit(EXIT_FAILURE);
+					}
+					recv(client_sd, buffer, size, 0);
+					printf("%s", buffer);
+					free(buffer);
+				}
+			}else break;
+		}
+/*
         while(recv(client_sd, &size, sizeof(int), 0) > 0){
         	if(size == -1) break;
             else{
@@ -154,7 +204,7 @@ void read_msg(){
 				printf("%s", buffer);
             	free(buffer);
         	}
-        }
+        }*/
     }else{
     	printf("\n%s\n", check);
 	}
@@ -179,13 +229,13 @@ void write_msg(){
         }
         user[strlen(user) - 1] = '\0';
         puts("");
-        send(client_sd, user, 129, 0);
-        recv(client_sd, &size, sizeof(int), 0);
+        while(send(client_sd, user, 129, 0) == -1   &&   errno == EINTR);
+        while(recv(client_sd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
         if((check = malloc(size)) == NULL){
         	printf("malloc failed, errno: %s\n", strerror(errno));
         	exit(EXIT_FAILURE);
     	}
-        recv(client_sd, check, size, 0);
+        while(recv(client_sd, check, size, 0) == -1   &&   errno == EINTR);
         if(strcmp(check, "username trovato") == 0){
         	found_dest = 1;
         	free(check);
@@ -205,8 +255,8 @@ void write_msg(){
     puts("\n");
     size = strlen(line);
 	line[size - 1] = '\0';
-	send(client_sd, &size, sizeof(int), 0);
-    send(client_sd, line, size, 0);
+	while(send(client_sd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+    while(send(client_sd, line, size, 0) == -1   &&   errno == EINTR);
 
 	//acquisizione testo del messaggio
     puts("inserisci testo del messaggio:");
@@ -217,8 +267,8 @@ void write_msg(){
     puts("\n");
     size = strlen(line);
     line[size - 1] = '\0';
-    send(client_sd, &size, sizeof(int), 0);
-    send(client_sd, line, size, 0);
+    while(send(client_sd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
+    while(send(client_sd, line, size, 0) == -1   &&   errno == EINTR);
     free(line);
 }
 
@@ -228,12 +278,12 @@ void del_msg(){
 	int size;
 	char *check;
 
-	recv(client_sd, &size, sizeof(int), 0);
+	while(recv(client_sd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
 	if((check = malloc(size)) == NULL){
 		printf("malloc failed, errno: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-	recv(client_sd, check, size, 0);
+	while(recv(client_sd, check, size, 0) == -1   &&   errno == EINTR);
 	puts("\n\nmessaggi cancellati con successo\n\n");
 }
 
@@ -242,7 +292,7 @@ void del_msg(){
 void close_client(){
 	int size;
 
-	recv(client_sd, &size, sizeof(int), 0);
+	while(recv(client_sd, &size, sizeof(int), 0) == -1   &&   errno == EINTR);
 	puts("");
     close(client_sd);
     exit(EXIT_SUCCESS);
@@ -301,9 +351,13 @@ int main(int argc, char **argv){
 	while(semop(sem_des, &oper, 1) == -1   &&   errno == EINTR);
 
     //connessione del client al server
-    if(connect(client_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
-        printf("connect failed, errno: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
+    while(connect(client_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
+    	if(errno == EINTR){
+    		continue;
+		}else{
+        	printf("connect failed, errno: %s\n", strerror(errno));
+        	exit(EXIT_FAILURE);
+    	}
     }
 
     //gestione segnali (avviene dopo la connect() in modo tale che, se un client che si vuole connettere va in attesa che si liberi un posto nel server, può decidere di uscire dallo stato di attesa. In altre parole può interrompere il processo)
@@ -314,7 +368,7 @@ int main(int argc, char **argv){
 	signal(SIGUSR2, handler2);
 
 	pid = getpid();
-	send(client_sd, &pid, sizeof(pid_t), 0);
+	while(send(client_sd, &pid, sizeof(pid_t), 0) == -1   &&   errno == EINTR);
 
     registrazione_utente(client_sd);
 
@@ -337,7 +391,7 @@ int main(int argc, char **argv){
             puts("input invalido (3), riprova");
             continue;
         }else{
-            send(client_sd, &choice, sizeof(int), 0);
+            while(send(client_sd, &choice, sizeof(int), 0) == -1   &&   errno == EINTR);
         }
 
         switch(choice){
@@ -349,7 +403,7 @@ int main(int argc, char **argv){
 				break;
             case 2:
                 if(autenticazione()){
-	                send(client_sd, username, 129, 0);
+	                while(send(client_sd, username, 129, 0) == -1   &&   errno == EINTR);
                     write_msg();
                 }
                 else puts("\npassword errata\n");
