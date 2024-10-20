@@ -148,19 +148,6 @@ void stampa_utenti(){
 			}
 		}else break;
 	}
-/*
-    while(recv(client_sd, &size, sizeof(int), 0) > 0){
-		if(size == -1) break;
-        else{
-        	if((buffer = malloc(size)) == NULL){
-        		printf("malloc failed, errno: %s\n", strerror(errno));
-        		exit(EXIT_FAILURE);
-    		}
-    		while(recv(client_sd, buffer, size, 0) == -1   &&   errno == EINTR);
-        	printf("\t\t%s\n", buffer);
-        	free(buffer);
-    	}
-    }*/
 }
 
 
@@ -192,19 +179,6 @@ void read_msg(){
 				}
 			}else break;
 		}
-/*
-        while(recv(client_sd, &size, sizeof(int), 0) > 0){
-        	if(size == -1) break;
-            else{
-        		if((buffer = malloc(size)) == NULL){
-                	printf("malloc failed, errno: %s\n", strerror(errno));
-                	exit(EXIT_FAILURE);
-	        	}
-            	recv(client_sd, buffer, size, 0);
-				printf("%s", buffer);
-            	free(buffer);
-        	}
-        }*/
     }else{
     	printf("\n%s\n", check);
 	}

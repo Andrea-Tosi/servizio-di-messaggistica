@@ -187,7 +187,7 @@ void spedisci_mess(int i){
 			while(send(sock_des[i], "username trovato", strlen("username trovato") + 1, 0) == -1   &&   errno == EINTR);
 		}
 	}while(!found_dest);
-    while(/*username[index][0] != '\0'  &&  */strcmp(username[index], mess_ptr -> destinatario) != 0){
+    while(strcmp(username[index], mess_ptr -> destinatario) != 0){
         index++;
     }
 
@@ -367,7 +367,6 @@ void termina_connessione(int i){
     pid[i] = 0;
     sock_des[i] = -1;
     close(sock_des[i]);
-    //devo chiudere anche nel server il socket con close(sock_des[i])?
 }
 
 
@@ -479,7 +478,7 @@ void *thread(void *arg){
     free(password);
 
 
-    while(1){//probabilmente dovrò mettere dei mutex perché lavoro con il file (spostando il file pointer) nel thread
+    while(1){
         while(recv(sock_des[me], &choice, sizeof(int), 0) == -1){
 			if(errno == EAGAIN || errno == EWOULDBLOCK){
 				TIMEOUT_OCCURRED(me);
@@ -616,9 +615,3 @@ int main(int argc, char **argv){
     	i = (i+1) % MAX_CLIENT;
     }
 }
-
-//per gestire i segnali posso o effettuare una signal() per ignorare tali segnali prima di una funzione bloccante, OPPURE posso eseguire un check con errno==EINTR e, in caso rieseguendo la chiamata
-//cambiare TIMEOUT_OCCURRED() in timeout_occurred()
-//per client limitati inizializzo un semaforo con MAX_CLIENT token
-
-//in alcuni casi di controllo di una recv, prima di eseguire exit() dovrei cancellare i messaggi
