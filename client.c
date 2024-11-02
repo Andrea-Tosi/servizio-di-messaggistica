@@ -274,18 +274,8 @@ void close_client(){
 
 
 
-//viene attivato quando il server viene chiuso: quest'ultimo "propaga" il segnale di interruzione inviandolo come SIGUSR1
-void handler1(int signum){
-	puts("\nil server è stato chiuso\n");
-	reset_echo_input(&orig_term_conf); //in questo modo se il client viene interrotto mentre la configurazione del terminale è modificata, verrà resettata
-	close(client_sd);
-	exit(0);
-}
-
-
-
-void handler2(int signum){
-	printf("\ntimeout of %d sec occurred\n", TIMEOUT);
+void handler(int signum){
+	puts("\nSIGPIPE ricevuta, la connessione con il server è terminata inaspettatamente\n");
 	reset_echo_input(&orig_term_conf); //in questo modo se il client viene interrotto mentre la configurazione del terminale è modificata, verrà resettata
 	close(client_sd);
 	exit(0);
@@ -297,21 +287,12 @@ int main(int argc, char **argv){
     struct sockaddr_in server;
     int size = 0;
     long choice;
-    char str_choice[11], *endptr, user[129], *buffer, *check;
+    char ch, str_choice[11], *endptr, user[129], *buffer, *check;
 	char *line = NULL;
 	size_t len = 0;
 
 	//salva le impostazioni standard del terminale (serve in caso di chiamata agli handler dato che loro non inizializzano la variabile orig_term_conf)
 	tcgetattr(STDIN_FILENO, &orig_term_conf);
-
-	//gestione semaforo
-	if( (sem_des = semget(KEY, 1, 0)) == -1){
-		printf("semget failed, errno: %s\n", strerror(errno));
-		exit(EXIT_FAILURE);
-	}
-	oper.sem_flg = SEM_UNDO;//se un client che usa il semaforo si interrompe in modo anomalo, l'operazione precedente eseguita su tale semaforo viene annullata
-	oper.sem_num = 0;
-	oper.sem_op = -1;
 
     //creazione socket
     if( (client_sd = (socket(AF_INET, SOCK_STREAM, 0))) == -1){
@@ -322,27 +303,28 @@ int main(int argc, char **argv){
     server.sin_family = AF_INET;
     server.sin_port = htons(PORT);
 
-	while(semop(sem_des, &oper, 1) == -1   &&   errno == EINTR);
-
     //connessione del client al server
     while(connect(client_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
     	if(errno == EINTR){
     		continue;
+		}else if(errno == ECONNREFUSED){
+			printf("\nserver sovraccarico. Premere R per riprovare, qualsiasi altro carattere per terminare\n");
+			ch = getchar();
+			CLEAR_INPUT_BUFFER;
+			if(ch == 82   ||   ch == 114) continue;
+			else exit(0);
 		}else{
         	printf("connect failed, errno: %s\n", strerror(errno));
         	exit(EXIT_FAILURE);
     	}
     }
+    puts("\nconnessione stabilita con successo");
 
     //gestione segnali (avviene dopo la connect() in modo tale che, se un client che si vuole connettere va in attesa che si liberi un posto nel server, può decidere di uscire dallo stato di attesa. In altre parole può interrompere il processo)
 	signal(SIGINT, SIG_IGN);
 	signal(SIGTERM, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
-	signal(SIGUSR1, handler1);
-	signal(SIGUSR2, handler2);
-
-	pid = getpid();
-	while(send(client_sd, &pid, sizeof(pid_t), 0) == -1   &&   errno == EINTR);
+	signal(SIGPIPE, handler);
 
     registrazione_utente(client_sd);
 

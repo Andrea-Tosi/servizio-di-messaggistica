@@ -19,7 +19,6 @@
 #define PORT 5001
 #define MAX_CLIENT 150
 #define PENDING 100
-#define KEY 1 //key deve essere >=0
 #define TIMEOUT 1800//secondi (30 minuti)
 
 void TIMEOUT_OCCURRED(int i);

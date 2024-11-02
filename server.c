@@ -1,9 +1,10 @@
 #include "lib.h"
 
 FILE *passwd;
+int max_clients = MAX_CLIENT;
 char username[MAX_CLIENT][129] = {""};
 int sock_des[MAX_CLIENT]; //array di descrittori di socket server connessi a client creati da connect() (valgono -1 nel caso in cui non ci sia un client nell'entry considerato)
-pid_t pid[MAX_CLIENT] = {0}; //assray di pid dei client connessi
+pthread_t tid[MAX_CLIENT] = {0}; //array di tid dei thread creati nel main, ognuno relativo ad un client connesso
 struct list{
 	struct messaggio *head;
 	struct messaggio *tail;
@@ -11,11 +12,11 @@ struct list{
 pthread_mutex_t mutex_file = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_mess = PTHREAD_MUTEX_INITIALIZER;
 struct list head_list[MAX_CLIENT];
-int sem_des;
-struct sembuf oper;
+
 
 
 void termina_connessione(int i);
+
 
 //ritorna -1 se non la trova, altrimenti ritorna la posizione del file pointer che indica l'inizio della parola (usato per cercare usernames in passwd)
 int cerca_username_in_file(FILE *file, char *word){
@@ -363,8 +364,7 @@ void termina_connessione(int i){
     cancella_mess(i);
     strcpy(username[i], "");
 
-    while(send(sock_des[i], &size, sizeof(int), MSG_NOSIGNAL) == -1   &&   errno == EINTR); //MSG_NOSIGNAL: flag per evitare SIGPIPE
-    pid[i] = 0;
+    while(send(sock_des[i], &size, sizeof(int), MSG_NOSIGNAL) == -1   &&   errno == EINTR); //MSG_NOSIGNAL: flag per evitare SIGPIPE. Importante per evitare loop in caso di invocazione da parte di handler a seguito di un SIGPIPE in un altro punto del codice
     sock_des[i] = -1;
     close(sock_des[i]);
 }
@@ -373,23 +373,35 @@ void termina_connessione(int i){
 
 void TIMEOUT_OCCURRED(int x){
 	long fpointer;
-	int check, temp;//temp assumerà il valore del pid del processo da terminare
+	int check;
 
 	pthread_mutex_lock(&mutex_file);
 	fpointer = ftell(passwd);
 	pthread_mutex_unlock(&mutex_file);
-	temp = pid[x];
 	if(fpointer != 0){
 		termina_connessione(x);
 	}else{
-		pid[x] = 0;
 		sock_des[x] = -1;
 		close(sock_des[x]);
 	}
-	check = kill(temp, SIGUSR2);
-	if(check == -1) printf("\nkill failed, errno: %s\n", strerror(errno));
+	printf("\nthread %ld terminato\n", tid[x]);
+	tid[x] = 0;
+	max_clients++;
+	pthread_exit(NULL);
+}
 
-	while(semop(sem_des, &oper, 1) == -1   &&   errno == EINTR);
+
+
+void sigpipe_handler(int signo){
+	pthread_t thread = pthread_self();
+	int i = 0;
+
+	puts("SIGPIPE RICEVUTA");
+	while(thread != tid[i]) i++;//ciclo per trovare il tid del thread che ha ricevuto SIGPIPE
+	termina_connessione(i);
+	printf("\nthread %ld terminato\n", thread);
+	tid[i] = 0;
+	max_clients++;
 	pthread_exit(NULL);
 }
 
@@ -401,17 +413,11 @@ void handler(int signum){
 
 	//ciclo per inviare SIGUSR1 a tutti i client connessi al server e cancellarne i messaggi conservati nel server
 	for(i=0; i<MAX_CLIENT; i++){
-        if(pid[i] != 0){
-            check = kill(pid[i], SIGUSR1);
-            if(check == -1) printf("\nkill failed, errno: %s\n", strerror(errno));
+        if(tid[i] != 0){
             cancella_mess(i);
     	}
 	}
 	fclose(passwd);
-	if(semctl(sem_des, 0, IPC_RMID) == -1){
-		printf("semctl failed, errno: %s\n", strerror(errno));
-		exit(EXIT_FAILURE);
-	}
 	exit(0);
 }
 
@@ -421,7 +427,7 @@ void *thread(void *arg){
     int me = (int)arg;
     int size, choice = 0;
     char *password, *encrypted_password;
-
+printf("\n___%d___%ld___\n", me, tid[me]);
     //ricezione username
     while(recv(sock_des[me], username[me], 129, 0) == -1){
     	if(errno == EAGAIN || errno == EWOULDBLOCK){
@@ -506,7 +512,9 @@ void *thread(void *arg){
             case 5:
                 if(autenticazione(me)){
                 	termina_connessione(me);
-                	while(semop(sem_des, &oper, 1) == -1   &&   errno == EINTR);
+					printf("\nthread %ld terminato\n", tid[me]);
+					tid[me] = 0;
+					max_clients++;
                 	pthread_exit(NULL);
             	}
                 break;
@@ -521,18 +529,19 @@ int main(int argc, char **argv){
     struct sockaddr client;
     struct timeval timeout;
     int server_sd;
-    int addrlen = sizeof(client),i=0, check;
-    pthread_t tid;
+    int addrlen = sizeof(client), i=0, check;
 
     timeout.tv_sec = TIMEOUT;
     timeout.tv_usec = 0; //inizializzato a 0 per evitare undefined behaviour
 
     for(; i<MAX_CLIENT; i++) sock_des[i]=-1;
 
+	//gestione segnali
 	signal(SIGHUP, handler);
 	signal(SIGINT, handler);
 	signal(SIGQUIT, handler);
 	signal(SIGTERM, handler);
+	signal(SIGPIPE, sigpipe_handler);
 
     //apertura file passwd
     if( (passwd = fopen("passwd","w+")) == NULL){
@@ -546,72 +555,59 @@ int main(int argc, char **argv){
     	head_list[i].tail = NULL;
 	}
 
-	//creazione semaforo con MAX_CLIENT token
-	if( (sem_des = semget(KEY, 1, IPC_CREAT|0666)) == -1){
-		printf("semget failed, errno: %s\n", strerror(errno));
-		exit(EXIT_FAILURE);
-	}
-	if(semctl(sem_des, 0, SETVAL, MAX_CLIENT) == -1){
-        printf("semctl failed, errno: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-    oper.sem_flg = 0;
-    oper.sem_num = 0;
-	oper.sem_op = 1;
+	//inizializzazione struct sockaddr_in
+	server.sin_family = AF_INET;
+	server.sin_port = htons(PORT);
+	server.sin_addr.s_addr = htonl(INADDR_ANY);
+	bzero(&(server.sin_zero), 8); //server.sin_zero contiene così tutti zeri
 
-    //creaz socket
-    if( (server_sd = (socket(AF_INET, SOCK_STREAM, 0))) == -1){
-        printf("socket failed, errno: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+	while(1){
+		while(!max_clients);//se limite threads è raggiunto, il main rimane bloccato su questo ciclo, altrimenti procede con l'istruzione successiva
 
-    server.sin_family = AF_INET;
-    server.sin_port = htons(PORT);
-    server.sin_addr.s_addr = htonl(INADDR_ANY);
-    bzero(&(server.sin_zero), 8); //server.sin_zero contiene così tutti zeri
+    	//creaz socket
+    	if( (server_sd = (socket(AF_INET, SOCK_STREAM, 0))) == -1){
+        	printf("socket failed, errno: %s\n", strerror(errno));
+        	exit(EXIT_FAILURE);
+    	}
 
+    	if(setsockopt(server_sd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1){
+        	printf("setsockopt failed, errno: %s\n", strerror(errno));
+        	exit(EXIT_FAILURE);
+    	}
 
-    if(setsockopt(server_sd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1){
-        printf("setsockopt failed, errno: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-    if(setsockopt(server_sd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1){
-    	printf("setsockopt failed, errno: %s\n", strerror(errno));
-    	exit(EXIT_FAILURE);
-	}
+    	//assegnazione indirizzo al socket
+    	if(bind(server_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
+        	printf("bind failed, errno: %s\n", strerror(errno));
+        	exit(EXIT_FAILURE);
+    	}
 
-    //assegnazione indirizzo al socket
-    if(bind(server_sd, (struct sockaddr *)&server, sizeof(server)) == -1){
-        printf("bind failed, errno: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+    	//socket pronto a ricevere richieste di connessione
+    	if(listen(server_sd, PENDING) == -1){
+        	printf("listen failed, errno: %s\n", strerror(errno));
+        	exit(EXIT_FAILURE);
+    	}
 
-    //socket pronto a ricevere richieste di connessione
-    if(listen(server_sd, PENDING) == -1){
-        printf("listen failed, errno: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+    	printf("\n\nserver sulla porta %d in stato listening\n\n", PORT);
 
-    printf("\n\nserver sulla porta %d in stato listening\n\n", PORT);
-
-    //il main thread continuerà ad accettare eventuali nuove connessioni, gli altri thread eseguiranno i servizi dell'applicazione
-    i = 0;
-    while(1){
-        if(sock_des[i] == -1){
-			while((sock_des[i] = accept(server_sd, &client, &addrlen)) == -1);
-			while(recv(sock_des[i], &(pid[i]), sizeof(pid_t), 0) == -1){
-				if(errno == EAGAIN || errno == EWOULDBLOCK){
-        			TIMEOUT_OCCURRED(i);
-            	}else if(errno == EINTR){
-                	continue;
-            	}else{
-                	printf("recv failed, errno: %s\n", strerror(errno));
-                	exit(EXIT_FAILURE);
-            	}
-        	}
-        	pthread_create(&tid, NULL, thread, (void *)i);
-			printf("\nthread creato, connesso con processo %d\n", pid[i]);
+    	//il main thread continuerà ad accettare eventuali nuove connessioni, gli altri thread eseguiranno i servizi dell'applicazione
+    	i = 0;
+    	while(1){
+			if(max_clients > 0){
+				if(sock_des[i] == -1){//nel caso in cui il server sia sovraccarico, non si entra nell'if
+					while((sock_des[i] = accept(server_sd, &client, &addrlen)) == -1);
+					if(setsockopt(sock_des[i], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1){//imposta sul socket di connessione creato un timeout
+						printf("setsockopt failed, errno: %s\n", strerror(errno));
+						exit(EXIT_FAILURE);
+					}
+					max_clients--;
+        			pthread_create(&(tid[i]), NULL, thread, (void *)i);
+					printf("\nthread %ld creato\n", tid[i]);
+				}
+    			i = (i+1) % MAX_CLIENT;
+			}else{
+				close(server_sd);//in questo modo la connect() del client ritorna errno == ECONNREFUSED
+				break;
+			}
 		}
-    	i = (i+1) % MAX_CLIENT;
-    }
+	}
 }
